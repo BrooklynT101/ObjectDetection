@@ -2,7 +2,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION "3.12")
 
 
 #this is set manually for the lab computers this should not be required for other systems with proper installation
-set(CMAKE_TOOLCHAIN_FILE "K:\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake")
+set(CMAKE_TOOLCHAIN_FILE "C:\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake")
 
 set(CMAKE_CXX_STANDARD 14)
 
