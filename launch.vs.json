@@ -1,0 +1,14 @@
+{
+  "version": "0.2.1",
+  "defaults": {},
+  "configurations": [
+    {
+      "args": ["object.png", "scene.png", "SIFT"],
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "ObjectDetection.exe",
+      "name": "ObjectDetection.exe",
+      "currentDir": "${workspaceRoot}"
+    }
+  ]
+}
