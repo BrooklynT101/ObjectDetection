@@ -7,6 +7,10 @@
 #include <string>
 #include <limits>
 
+
+using namespace cv;
+using namespace std;
+
 // Global Timer Class
 Timer timer;
 
@@ -25,7 +29,7 @@ cv::Mat kptScene;
 
 cv::Mat matchImg;
 
-cv::Ptr<cv::FeatureDetector> detector;
+cv::Ptr<cv::FeatureDetector> detector = cv::SIFT::create();
 cv::Ptr<cv::DescriptorMatcher> matcher = cv::FlannBasedMatcher::create();
 
 
@@ -112,7 +116,7 @@ int findFeatures(cv::Ptr<cv::FeatureDetector> detector, cv::Ptr<cv::DescriptorMa
 		timer.reset();
 		std::vector<std::vector<cv::DMatch>> matches;
 		matcher->knnMatch(descriptors1, descriptors2, matches, 2);
-		std::cout << "Found " << matches.size() << " matches in " << timer.elapsed() << " seconds" << std::endl;
+		std::cout << "Found " << matches.size() << " matches in " << timer.elapsed() << " seconds using BFM" << std::endl;
 
 		// Filter the matches
 		std::cout << "\nFinding good matches..." << std::endl;
@@ -143,7 +147,7 @@ int findFeatures(cv::Ptr<cv::FeatureDetector> detector, cv::Ptr<cv::DescriptorMa
 		timer.reset();
 		std::vector<std::vector<cv::DMatch>> matches;
 		matcher->knnMatch(descriptors1, descriptors2, matches, 2);
-		std::cout << "Found " << matches.size() << " matches in " << timer.elapsed() << " seconds" << std::endl;
+		std::cout << "Found " << matches.size() << " matches in " << timer.elapsed() << " seconds using FLANN" << std::endl;
 
 		// Filter the matches
 		std::cout << "\nFinding good matches..." << std::endl;
@@ -225,17 +229,15 @@ int speedTest() {
  * Run the object detection program using the current settings
  */
 int runObjectDetection() {
-	// Load the images if they are not already loaded
-	if (objectImage.empty() || sceneImage.empty()) {
-		if (loadImages() == -1) return -1;
-	}
+	// Load the images even if they are already loaded
+	if (loadImages() == -1) return -1;
 
 	// Set up the variables
 	std::vector<cv::DMatch> goodMatches;
-	std::vector<cv::KeyPoint> keypoints1, keypoints2;
-	std::vector<cv::Point2f> goodPts1, goodPts2;
+	std::vector<cv::KeyPoint> objectKeypoints, sceneKeypoints;
+	std::vector<cv::Point2f> objectGoodPts, sceneGoodPts;
 	std::vector<unsigned char> inliers;
-	cv::Mat descriptors1, descriptors2;
+	cv::Mat objectDescriptors, sceneDescriptors;
 	cv::Mat detImage  = sceneImage.clone(); // Deep copy of the scene image for drawing the box on
 	if (detImage.empty()) {
 		std::cerr << "Could not clone the scene image" << std::endl;
@@ -272,36 +274,32 @@ int runObjectDetection() {
 			matcher = cv::makePtr<cv::FlannBasedMatcher>(indexParams);
 		}
 
-		// Detect the features
+		// Detect the keypoints and compute the descriptors
 		std::cout << "\nDetecting image features..." << std::endl;
 		timer.reset();
-		detector->detectAndCompute(objectImage, cv::noArray(), keypoints1, descriptors1);
-		std::cout << "Detected " << keypoints1.size() << " features in object in " << timer.elapsed() << " seconds" << std::endl;
+		detector->detectAndCompute(objectImage, cv::Mat(), objectKeypoints, objectDescriptors);
+		std::cout << "Detected " << objectKeypoints.size() << " features in object in " << timer.elapsed() << " seconds" << std::endl;
 		timer.reset();
-		detector->detectAndCompute(sceneImage, cv::noArray(), keypoints2, descriptors2);
-		std::cout << "Detected " << keypoints2.size() << " features in scene in " << timer.elapsed() << " seconds" << std::endl;
-
-		// After getting a thousand read access violations CGPT suggested this
-		/*if (toLower(matcherMethod) == "flann" && toLower(detectionMethod) == "orb") {
-			if (descriptors1.type() != CV_32F) {
-				descriptors1.convertTo(descriptors1, CV_32F);
-			}
-			if (descriptors2.type() != CV_32F) {
-				descriptors2.convertTo(descriptors2, CV_32F);
-			}
-		}*/
+		detector->detectAndCompute(sceneImage, cv::Mat(), sceneKeypoints, sceneDescriptors);
+		std::cout << "Detected " << sceneKeypoints.size() << " features in scene in " << timer.elapsed() << " seconds" << std::endl;
 
 		// Draw the KeyPoints on each image and display them
 		cv::Mat kptObject, kptScene;
-		cv::drawKeypoints(objectImage, keypoints1, kptObject, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-		cv::drawKeypoints(sceneImage, keypoints2, kptScene, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-		cv::imshow("Object Keypoints", kptObject);
-		cv::imshow("Scene Keypoints", kptScene);
+		cv::Mat kptObjectImage, kptSceneImage;
+		kptObjectImage = objectImage.clone();
+		kptSceneImage = sceneImage.clone();
+		cv::drawKeypoints(kptObjectImage, objectKeypoints, kptObject, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+		cv::drawKeypoints(kptSceneImage, sceneKeypoints, kptScene, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+		cv::namedWindow("Object Keypoints", cv::WINDOW_NORMAL);
+		cv::namedWindow("Scene Keypoints", cv::WINDOW_NORMAL);
+		cv::imshow("Object Keypoints", kptObjectImage);
+		cv::imshow("Scene Keypoints", kptSceneImage);
 
+		// Match the descriptors
 		timer.reset();
 		std::vector<std::vector<cv::DMatch>> matches;
-		matcher->knnMatch(descriptors1, descriptors2, matches, 2);
-		std::cout << "Found " << matches.size() << " matches in " << timer.elapsed() << " seconds" << std::endl;
+		matcher->knnMatch(objectDescriptors, sceneDescriptors, matches, 2);
+		std::cout << "Found " << matches.size() << " matches in " << timer.elapsed() << " seconds  using FLANN" << std::endl;
 
 		// Filter the matches
 		std::cout << "\nFinding good matches..." << std::endl;
@@ -313,11 +311,15 @@ int runObjectDetection() {
 				goodMatches.push_back(match[0]);
 
 				// Extract the good features from the good matches
-				goodPts1.push_back(keypoints1[match[0].queryIdx].pt);
-				goodPts2.push_back(keypoints2[match[0].trainIdx].pt);
+				objectGoodPts.push_back(objectKeypoints[match[0].queryIdx].pt);
+				sceneGoodPts.push_back(sceneKeypoints[match[0].trainIdx].pt);
 			}
 		}
-		std::cout << "Found " << goodMatches.size() << " good matches and " << goodPts1.size() + goodPts2.size() << " good features from them in " << timer.elapsed() << " seconds" << std::endl;
+		std::cout << "Found " << goodMatches.size() << " good matches and " << objectGoodPts.size() + sceneGoodPts.size() << " good features from them in " << timer.elapsed() << " seconds" << std::endl;
+
+		// Draw keypoints and good matches
+	cv::Mat imgMatches;
+	cv::drawMatches(objectImage, objectKeypoints, sceneImage, sceneKeypoints, goodMatches, imgMatches);
 	}
 	else if (toLower(matcherMethod) == "bfm") {
 		// If the detector is ORB, use Hamming distance
@@ -330,23 +332,29 @@ int runObjectDetection() {
 		// Detect the features
 		std::cout << "\nDetecting image features..." << std::endl;
 		timer.reset();
-		detector->detectAndCompute(objectImage, cv::noArray(), keypoints1, descriptors1);
-		std::cout << "Detected " << keypoints1.size() << " features in object in " << timer.elapsed() << " seconds" << std::endl;
+		detector->detectAndCompute(objectImage, cv::noArray(), objectKeypoints, objectDescriptors);
+		std::cout << "Detected " << objectKeypoints.size() << " features in object in " << timer.elapsed() << " seconds" << std::endl;
 		timer.reset();
-		detector->detectAndCompute(sceneImage, cv::noArray(), keypoints2, descriptors2);
-		std::cout << "Detected " << keypoints2.size() << " features in scene in " << timer.elapsed() << " seconds" << std::endl;
+		detector->detectAndCompute(sceneImage, cv::noArray(), sceneKeypoints, sceneDescriptors);
+		std::cout << "Detected " << sceneKeypoints.size() << " features in scene in " << timer.elapsed() << " seconds" << std::endl;
 
 		// Draw the KeyPoints on each image and display them
 		cv::Mat kptObject, kptScene;
-		cv::drawKeypoints(objectImage, keypoints1, kptObject, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-		cv::drawKeypoints(sceneImage, keypoints2, kptScene, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-		cv::imshow("Object Keypoints", kptObject);
-		cv::imshow("Scene Keypoints", kptScene);
+		cv::Mat kptObjectImage, kptSceneImage;
+		kptObjectImage = objectImage.clone();
+		kptSceneImage = sceneImage.clone();
+		cv::drawKeypoints(kptObjectImage, objectKeypoints, kptObject, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+		cv::drawKeypoints(kptSceneImage, sceneKeypoints, kptScene, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+		cv::namedWindow("Object Keypoints", cv::WINDOW_NORMAL);
+		cv::namedWindow("Scene Keypoints", cv::WINDOW_NORMAL);
+		cv::imshow("Object Keypoints", kptObjectImage);
+		cv::imshow("Scene Keypoints", kptSceneImage);
 
+		// Match the descriptors
 		timer.reset();
 		std::vector<std::vector<cv::DMatch>> matches;
-		matcher->knnMatch(descriptors1, descriptors2, matches, 2);
-		std::cout << "Found " << matches.size() << " matches in " << timer.elapsed() << " seconds" << std::endl;
+		matcher->knnMatch(objectDescriptors, sceneDescriptors, matches, 2);
+		std::cout << "Found " << matches.size() << " matches in " << timer.elapsed() << " seconds using BFM" << std::endl;
 
 		// Filter the matches
 		std::cout << "\nFinding good matches..." << std::endl;
@@ -358,11 +366,11 @@ int runObjectDetection() {
 				goodMatches.push_back(match[0]);
 
 				// Extract the good features from the good matches
-				goodPts1.push_back(keypoints1[match[0].queryIdx].pt);
-				goodPts2.push_back(keypoints2[match[0].trainIdx].pt);
+				objectGoodPts.push_back(objectKeypoints[match[0].queryIdx].pt);
+				sceneGoodPts.push_back(sceneKeypoints[match[0].trainIdx].pt);
 			}
 		}
-		std::cout << "Found " << goodMatches.size() << " good matches and " << goodPts1.size() + goodPts2.size() << " good features from them in " << timer.elapsed() << " seconds" << std::endl;
+		std::cout << "Found " << goodMatches.size() << " good matches and " << objectGoodPts.size() + sceneGoodPts.size() << " good features from them in " << timer.elapsed() << " seconds" << std::endl;
 	}
 	else {
 		std::cerr << "Matcher method invalid" << std::endl;
@@ -371,25 +379,35 @@ int runObjectDetection() {
 
 	// Compute the homography matrix
 	timer.reset();
-	cv::Mat H = cv::findHomography(goodPts2, goodPts1, inliers, cv::RANSAC);
+	cv::Mat H = cv::findHomography(objectGoodPts, sceneGoodPts, inliers, cv::RANSAC);
 	if (H.empty()) { // Error check
-		std::cerr << "Homography computation failed." << std::endl;
+		std::cerr << "Error: Homography matrix is empty. Object not detected!" << std::endl;
 		exit(-1);
 	}
 	std::cout << "Calculated the homography matrix in " << timer.elapsed() << " seconds:\n" << H << std::endl;
 
+	// Count the inliers
+	int inlierCount = cv::countNonZero(inliers);
+	std::cout << "Number of inliers: " << inlierCount << " out of " << goodMatches.size() << " good matches." << std::endl;
+
 	// Draw the Bounding Box - used the code from I think lab02 to find the corners
-	std::vector<cv::Point2f> objCorners = {
-		cv::Point2f(0, 0),
-		cv::Point2f((float)objectImage.cols, 0),
-		cv::Point2f((float)objectImage.cols, (float)objectImage.rows),
-		cv::Point2f(0, (float)objectImage.rows)
-	};
+	std::vector<cv::Point2f> objCorners(4);
+	objCorners[0] = cv::Point2f(0, 0); // top-left corner
+	objCorners[1] = cv::Point2f((float)objectImage.cols, 0); // top-right corner
+	objCorners[2] = cv::Point2f((float)objectImage.cols, (float)objectImage.rows); // bottom-right corner
+	objCorners[3] = cv::Point2f(0, (float)objectImage.rows); // bottom-left corner
 
 	std::vector<cv::Point2f> sceneCorners(4);
 	cv::perspectiveTransform(objCorners, sceneCorners, H);
 
+	std::cout << "Transformed Box Coordinates:\n";
+	for (const auto& point : sceneCorners) {
+		std::cout << point << std::endl;
+	}
+	
+	// Draw a bounding box around the detected object using cv::line
 	for (size_t i = 0; i < sceneCorners.size(); i++) {
+		// Draw lines between corners
 		cv::line(detImage, sceneCorners[i], sceneCorners[(i + 1) % sceneCorners.size()], cv::Scalar(0, 255, 0), 4);
 	}
 
@@ -397,11 +415,88 @@ int runObjectDetection() {
 
 	// Save the detected object
 	cv::imwrite("detectedObject.png", detImage);
-	cv::namedWindow("Detection");
+
+	// Display the result
+	cv::namedWindow("Detection", cv::WINDOW_NORMAL);
 	cv::imshow("Detection", detImage);
-	std::cout << "That took " << timer.elapsed() << " seconds" << std::endl;
+	// std::cout << "That took " << timer.elapsed() << " seconds" << std::endl;
 	cv::waitKey();
 	return 0;// Success
+}
+
+void detectAndDrawBoundingBox() {
+	loadImages();
+
+	// Detect keypoints and compute descriptors
+	std::vector<cv::KeyPoint> objectKeypoints, sceneKeypoints;
+	cv::Mat objectDescriptors, sceneDescriptors;
+	detector->detectAndCompute(objectImage, cv::Mat(), objectKeypoints, objectDescriptors);
+	detector->detectAndCompute(sceneImage, cv::Mat(), sceneKeypoints, sceneDescriptors);
+
+	// FLANN based matcher for feature matching
+	cv::FlannBasedMatcher matcher;
+
+	// Match descriptors
+	std::vector<cv::DMatch> matches;
+	matcher.match(objectDescriptors, sceneDescriptors, matches);
+
+	// Find the good matches (optional, can be adjusted later)
+	double maxDist = 0;
+	double minDist = 100;
+	for (size_t i = 0; i < objectDescriptors.rows; i++) {
+		double dist = matches[i].distance;
+		if (dist < minDist) minDist = dist;
+		if (dist > maxDist) maxDist = dist;
+	}
+
+	// Filter good matches based on the minimum distance
+	std::vector<cv::DMatch> goodMatches;
+	for (size_t i = 0; i < objectDescriptors.rows; i++) {
+		if (matches[i].distance <= std::max(2 * minDist, 0.02)) {
+			goodMatches.push_back(matches[i]);
+		}
+	}
+
+	// Draw keypoints and good matches
+	cv::Mat imgMatches;
+	cv::drawMatches(objectImage, objectKeypoints, sceneImage, sceneKeypoints, goodMatches, imgMatches);
+
+	// Display keypoints on each image
+	cv::imshow("Keypoints", imgMatches);
+
+	// Use the good matches to find the object�s bounding box in the scene
+	std::vector<cv::Point2f> objPoints;
+	std::vector<cv::Point2f> scenePoints;
+
+	for (size_t i = 0; i < goodMatches.size(); i++) {
+		objPoints.push_back(objectKeypoints[goodMatches[i].queryIdx].pt);
+		scenePoints.push_back(sceneKeypoints[goodMatches[i].trainIdx].pt);
+	}
+
+	// Compute the homography matrix
+	cv::Mat H = cv::findHomography(objPoints, scenePoints, cv::RANSAC);
+
+	// Get the corners of the object image (rectangle)
+	std::vector<cv::Point2f> objCorners(4);
+	objCorners[0] = cv::Point2f(0, 0);
+	objCorners[1] = cv::Point2f((float)objectImage.cols, 0);
+	objCorners[2] = cv::Point2f((float)objectImage.cols, (float)objectImage.rows);
+	objCorners[3] = cv::Point2f(0, (float)objectImage.rows);
+
+	// Warp the corners using the homography matrix
+	std::vector<cv::Point2f> sceneCorners(4);
+	cv::perspectiveTransform(objCorners, sceneCorners, H);
+
+	// Draw a bounding box around the detected object using cv::line
+	for (int i = 0; i < 4; i++) {
+		// Draw lines between corners
+		cv::line(sceneImage, sceneCorners[i], sceneCorners[(i + 1) % 4], cv::Scalar(0, 255, 0), 3);
+	}
+
+	// Display the result
+	cv::namedWindow("Detected Object", cv::WINDOW_NORMAL);
+	cv::imshow("Detected Object", sceneImage);
+	cv::waitKey(0);
 }
 
 /*
@@ -539,6 +634,9 @@ int mainMenu() {
 		case 5:
 			std::cout << "Exiting program.\n";
 			exitProgram = true;
+			break;
+		case 6:
+			detectAndDrawBoundingBox();
 			break;
 		default:
 			std::cout << "Invalid input, please input an integer in range of the options.\n";
