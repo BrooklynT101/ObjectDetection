@@ -5,8 +5,16 @@
 #include <algorithm>
 #include <iostream>
 #include <string>
+#include <limits>
 
+// Global Timer Class
 Timer timer;
+
+// Global variables for settings (default values already defined)
+std::string objectImageFilename = "object.jpg";
+std::string sceneImageFilename = "scene.jpg";
+std::string detectionMethod = "sift";  // e.g., "sift" or "orb"
+std::string matcherMethod = "flann";     // e.g., "flann" or "bfm"
 
 // Global variables
 cv::Mat object;
@@ -20,6 +28,9 @@ cv::Mat matchImg;
 cv::Ptr<cv::FeatureDetector> detector;
 cv::Ptr<cv::DescriptorMatcher> matcher;
 
+/*
+* Print the usage of the program, to show which values are loaded for the object detection
+*/
 void printUsage() {
 	std::cout << "Usage: " << std::endl;
 	std::cout << " ObjectDetector <object image> <scene image> <method>" << std::endl;
@@ -29,6 +40,7 @@ void printUsage() {
 	std::cout << " e.g.: ObjectDetector object.png scene.png SIFT" << std::endl;
 }
 
+// Utility function to convert a string to lowercase
 std::string toLower(const std::string& str) {
 	std::string result = str;
 	std::transform(result.begin(), result.end(), result.begin(),
@@ -37,18 +49,25 @@ std::string toLower(const std::string& str) {
 	return result;
 }
 
+// Utility function to clear std::cin error flags and ignore the rest of the line.
+void clearInputStream() {
+	std::cin.clear();
+	std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+}
+
+// Utility function to load images from the filenames
 int loadImages() {
 	std::cout << "Loading images..." << std::endl;
 	timer.reset();
-	object = cv::imread("object.jpg");
-	scene = cv::imread("scene.jpg");
+	object = cv::imread(objectImageFilename);
+	scene = cv::imread(sceneImageFilename);
 
 	if (object.empty()) {
-		std::cerr << "Could not load object from object.jpg" << std::endl;
+		std::cerr << "Could not load object image from " << objectImageFilename << std::endl;
 		return -1; // Error
 	}
 	if (scene.empty()) {
-		std::cerr << "Could not load scene from scene.jpg" << std::endl;
+		std::cerr << "Could not load scene image from " << sceneImageFilename << std::endl;
 		return -1; // Error
 	}
 	std::cout << "Images loaded successfully, took " << timer.elapsed() << " seconds" << std::endl;
@@ -204,13 +223,93 @@ int speedTest() {
 }
 
 /*
+ * Run the object detection program using the current settings
+ */
+int runObjectDetection() {
+	return 0;// Success
+}
+
+/*
  * Settings menu for the object detection program
- * 
- * Includes options for: 
+ *
+ * Includes options for:
  * - defining object and scene images ~ user can define the image filenames for scene and object or use default filenames (object.jpg and scene.jpg)
  * - choosing detection method ~ choice SIFT or ORB, then FLANN or BFM matcher, then returns to the main menu
  */
 int settingsMenu() {
+	int choice = 0;
+	bool exitMenu = false;
+
+	while (!exitMenu) {
+		std::cout << "\n--- Settings Menu ---\n";
+		std::cout << "1. Set object image filename (current: " << objectImageFilename << ")\n";
+		std::cout << "2. Set scene image filename (current: " << sceneImageFilename << ")\n";
+		std::cout << "3. Set detection method (current: " << detectionMethod << ")\n";
+		std::cout << "4. Set matcher method (current: " << matcherMethod << ")\n";
+		std::cout << "5. Return to Main Menu\n";
+		std::cout << "Enter your choice (1-5): ";
+
+		if (!(std::cin >> choice)) {
+			std::cout << "Invalid input, please input an integer in range of the options.\n";
+			clearInputStream();
+			continue;
+		}
+
+		clearInputStream(); // clear leftover newline characters
+
+		switch (choice) {
+		case 1: {
+			std::cout << "Enter new object image filename: ";
+			std::getline(std::cin, objectImageFilename);
+			std::cout << "Object image filename set to: " << objectImageFilename << "\n";
+			break;
+		}
+		case 2: {
+			std::cout << "Enter new scene image filename: ";
+			std::getline(std::cin, sceneImageFilename);
+			std::cout << "Scene image filename set to: " << sceneImageFilename << "\n";
+			break;
+		}
+		case 3: {
+			std::cout << "Choose detection method (sift/orb): ";
+			std::string input;
+			std::getline(std::cin, input);
+			// Convert input to lowercase
+			std::transform(input.begin(), input.end(), input.begin(), ::tolower);
+			if (input == "sift" || input == "orb") {
+				detectionMethod = input;
+				std::cout << "Detection method set to: " << detectionMethod << "\n";
+			}
+			else {
+				std::cout << "Invalid detection method. Please choose either 'sift' or 'orb'.\n";
+			}
+			break;
+		}
+		case 4: {
+			std::cout << "Choose matcher method (flann/bfm): ";
+			std::string input;
+			std::getline(std::cin, input);
+			// Convert input to lowercase
+			std::transform(input.begin(), input.end(), input.begin(), ::tolower);
+			if (input == "flann" || input == "bfm") {
+				matcherMethod = input;
+				std::cout << "Matcher method set to: " << matcherMethod << "\n";
+			}
+			else {
+				std::cout << "Invalid matcher method. Please choose either 'flann' or 'bfm'.\n";
+			}
+			break;
+		}
+		case 5: {
+			exitMenu = true;
+			break;
+		}
+		default: {
+			std::cout << "Invalid input, please input an integer in range of the options.\n";
+			break;
+		}
+		}
+	}
 	return 0; // Success
 }
 
@@ -223,38 +322,61 @@ int settingsMenu() {
  * - settings menu ~ to change the object and scene images or the detection method
  * - running speed test ~ to compare SIFT and ORB detector with FLANN and BFM matcher
  * - exit ~ to close the program
+ *
+ * Had ChatGPT help me understand how to structure the main menu and read user input,
+ * then used the same structure for the settings menu. Returned some broken code I had to alter
+ * to work with the existing program.
  */
 int mainMenu() {
+	int choice = 0;
+	bool exitProgram = false;
+
+	while (!exitProgram) {
+		std::cout << "\n--- Main Menu ---\n";
+		std::cout << "1. Run Object Detection\n";
+		std::cout << "2. Print Usage (Current Settings)\n";
+		std::cout << "3. Settings Menu\n";
+		std::cout << "4. Speed Test\n";
+		std::cout << "5. Exit\n";
+		std::cout << "Enter your choice (1-5): ";
+
+		if (!(std::cin >> choice)) {
+			std::cout << "Invalid input, please input an integer in range of the options.\n";
+			clearInputStream();
+			continue;
+		}
+
+		clearInputStream();
+
+		switch (choice) {
+		case 1:
+			runObjectDetection();
+			break;
+		case 2:
+			printUsage();
+			break;
+		case 3:
+			settingsMenu();
+			break;
+		case 4:
+			speedTest();
+			break;
+		case 5:
+			std::cout << "Exiting program.\n";
+			exitProgram = true;
+			break;
+		default:
+			std::cout << "Invalid input, please input an integer in range of the options.\n";
+			break;
+		}
+	}
+
 	return 0; // Success
 }
 
 int main(int argc, char* argv[]) {
-	Timer timer;
-
-	if (argc != 4) {
-		printUsage();
-		exit(-1);
-	}
-
-	cv::Mat objImage = cv::imread(argv[1]);
-	if (objImage.empty()) {
-		std::cerr << "Failed to read image from " << argv[1] << std::endl;
-		exit(-2);
-	}
-
-	cv::Mat scnImage = cv::imread(argv[2]);
-	if (scnImage.empty()) {
-		std::cerr << "Failed to read image from " << argv[2] << std::endl;
-		exit(-3);
-	}
-
-	std::string method = toLower(argv[3]);
-
-	if (method != "sift" && method != "orb") {
-		std::cerr << "Invalid method '" << argv[3] << "'" << std::endl;
-		exit(-4);
-	}
-	cv::Mat detImage = scnImage.clone();
+	// Start the main menu
+	mainMenu();
 
 	///////////////////////////////////////////////////////
 	// Code goes here to detect the object in the scene  //
@@ -262,12 +384,4 @@ int main(int argc, char* argv[]) {
 	// detImage, which has been initialised to be a copy //
 	// of the scene.                                     //
 	///////////////////////////////////////////////////////
-
-	// Save the detected object
-	cv::imwrite("detectedObject.png", detImage);
-	cv::namedWindow("Detection");
-	cv::imshow("Detection", detImage);
-	std::cout << "That took " << timer.elapsed() << " seconds" << std::endl;
-	cv::waitKey();
-
 }
