@@ -31,15 +31,5 @@
 *.out
 *.app
 out/
-.vs/*
+.vs/
 detectedObject.png
-.vs/VSWorkspaceState.json
-.vs/slnx.sqlite
-.vs/VSWorkspaceState.json
-.vs/ObjectDetection/CopilotIndices/17.13.431.34963/CodeChunks.db
-.vs/ObjectDetection/CopilotIndices/17.13.431.34963/SemanticSymbols.db
-.vs/ObjectDetection/FileContentIndex/e149fac8-237c-4577-b240-32e0da51b3fd.vsidx
-.vs/ObjectDetection/v17/.wsuo
-.vs/ObjectDetection/v17/Browse.VC.db
-.vs/ObjectDetection/v17/DocumentLayout.json
-out/build/x64-Debug/CMakeCache.txt
