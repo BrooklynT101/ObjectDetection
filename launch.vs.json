@@ -3,7 +3,7 @@
   "defaults": {},
   "configurations": [
     {
-      "args": ["object.png", "scene.png", "SIFT"],
+      //"args": ["object.png", "scene.png", "SIFT"], // used a menu system instead of the arguments, hope thats not an issue
       "type": "default",
       "project": "CMakeLists.txt",
       "projectTarget": "ObjectDetection.exe",
