@@ -38,8 +38,9 @@ void printUsage() {
 	std::cout << "Current settings:" << std::endl;
 	std::cout << "Object image: " << objectImageFilename << std::endl;
 	std::cout << "Scene image: " << sceneImageFilename << std::endl;
-	std::cout << "Detection method: " << detectionMethod << std::endl;
-	std::cout << "Matcher method: " << matcherMethod << std::endl;
+	std::cout << "Detection method: " << detectionMethod << " with a default feature cap of 0 (SIFT's infinite cap)" << std::endl;
+	std::cout << "Matcher method: " << matcherMethod << " with KNN where k = 2" << std::endl;
+	std::cout << "Lowes Ratio (for standard test): 0.8" << std::endl;
 }
 
 // Utility function to convert a string to lowercase
@@ -47,7 +48,6 @@ std::string toLower(const std::string& str) {
 	std::string result = str;
 	std::transform(result.begin(), result.end(), result.begin(),
 		[](unsigned char c) { return std::tolower(c); });
-
 	return result;
 }
 
@@ -57,7 +57,7 @@ void clearInputStream() {
 	std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 }
 
-// Utility function to load images from the filenames
+// Utility function to load images from the global filenames
 int loadImages() {
 	std::cout << "Loading images..." << std::endl;
 	timer.reset();
@@ -96,6 +96,33 @@ int drawBoxAndSaveImage(const std::string& filename, cv::Mat image, std::vector<
 	//cv::namedWindow(filename, cv::WINDOW_NORMAL);
 	//cv::imshow(filename, sceneImageClone);
 	return 0;
+}
+
+// Utility function to save the matches image
+int saveMatchesImage(cv::Mat objectImage, cv::Mat sceneImage, std::vector<cv::KeyPoint> objectKeypoints, std::vector<cv::KeyPoint> sceneKeypoints, std::vector<cv::DMatch> goodMatches, string filename) {
+	if (objectImage.empty() || sceneImage.empty()) {
+		std::cerr << "Could not load images for drawing matches" << std::endl;
+		return -1; // Error
+	}
+
+	// Create output image: width = sum of both widths, height = max of both heights, so this actually fits the thing
+	int totalWidth = objectImage.cols + sceneImage.cols;
+	int maxHeight = std::max(objectImage.rows, sceneImage.rows);
+	
+	cv::Mat matchImg(maxHeight, totalWidth, CV_8UC3, cv::Scalar(0, 0, 0)); // Create a black image to draw on, 8-bit unsigned 3-channel image standard color image (BGR).
+	// Draw the matches using OpenCVs function
+
+	cv::drawMatches(objectImage, objectKeypoints, sceneImage, sceneKeypoints, goodMatches, matchImg);
+	if (matchImg.empty()) {
+		std::cerr << "Could not draw matches" << std::endl;
+		return -1; // Error
+	}
+
+	// Save the image
+	if (!cv::imwrite(filename, matchImg)) {
+		std::cerr << "Failed to save image to: " << filename << std::endl;
+	}
+	return 0; // Success
 }
 
 /*
@@ -227,6 +254,9 @@ int runObjectDetection(bool test) {
 		return -1; // Error
 	}
 
+	// Set detector variables
+	int nfeaturesCap = 0; // Default value for SIFT is inf, ORB is 500
+
 	// Method info
 	if (!test) {
 		std::cout << "Running object detection..." << std::endl;
@@ -238,10 +268,10 @@ int runObjectDetection(bool test) {
 
 	// Set up the detector based on the settings
 	if (toLower(detectionMethod) == "sift") {
-		detector = cv::SIFT::create();
+		detector = cv::SIFT::create(nfeaturesCap);
 	}
 	else if (toLower(detectionMethod) == "orb") {
-		detector = cv::ORB::create();
+		detector = cv::ORB::create(nfeaturesCap);
 	}
 	else {
 		std::cerr << "Detection method invalid" << std::endl;
@@ -254,8 +284,12 @@ int runObjectDetection(bool test) {
 			// If the detector is orb, if so set FLANN matcher to use LSH index
 			if (!test) std::cout << "Using ORB detector, setting matchers to use LSH index..." << std::endl;
 			// ChatGPT suggested using these parameters for the LSH index to fix an error I was getting, please let me know if this was unnecessary and there was simply something I was missing
-			cv::Ptr<cv::flann::IndexParams> indexParams = cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2);
+			cv::Ptr<cv::flann::IndexParams> indexParams = cv::makePtr <cv::flann::LshIndexParams>(12, 20, 2);
 			matcher = cv::makePtr<cv::FlannBasedMatcher>(indexParams);
+			//matcher = cv::makePtr<cv::FlannBasedMatcher>();
+		}
+		else {
+			matcher = cv::FlannBasedMatcher::create();
 		}
 
 		// Detect the keypoints and compute the descriptors
@@ -273,8 +307,12 @@ int runObjectDetection(bool test) {
 			cv::Mat kptObjectImage, kptSceneImage;
 			kptObjectImage = objectImage.clone();
 			kptSceneImage = sceneImage.clone();
-			cv::drawKeypoints(kptObjectImage, objectKeypoints, kptObject, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-			cv::drawKeypoints(kptSceneImage, sceneKeypoints, kptScene, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+			cv::drawKeypoints(kptObjectImage, objectKeypoints, kptObjectImage, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+			cv::drawKeypoints(kptSceneImage, sceneKeypoints, kptSceneImage, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+			// Save the images with keypoints
+			cv::imwrite("object_keypoints.jpg", kptObjectImage);
+			cv::imwrite("scene_keypoints.jpg", kptSceneImage);
+			// Display the images with keypoints
 			cv::namedWindow("Object Keypoints", cv::WINDOW_NORMAL);
 			cv::namedWindow("Scene Keypoints", cv::WINDOW_NORMAL);
 			cv::imshow("Object Keypoints", kptObjectImage);
@@ -290,15 +328,19 @@ int runObjectDetection(bool test) {
 		if (!test)std::cout << "\nFinding good matches..." << std::endl;
 		timer.reset();
 		for (const auto& match : matches) {
-			if (match.size() < 2)
+			if (match.size() < 2) {
+				std::cout << "Skipping match due to insufficient size." << std::endl;
 				continue;  // Skip if not enough matches are found in this set
-			if (match[0].distance < 0.8 * match[1].distance) {
+			}
+			float ratio = match[0].distance / match[1].distance;
+			if (ratio < 0.8) {
 				goodMatches.push_back(match[0]);
 
 				// Extract the good features from the good matches
 				objectGoodPts.push_back(objectKeypoints[match[0].queryIdx].pt);
 				sceneGoodPts.push_back(sceneKeypoints[match[0].trainIdx].pt);
 			}
+			//std::cout << "Ratio: " << ratio << ", Match distances: " << match[0].distance << ", " << match[1].distance << std::endl;
 		}
 		if (!test)std::cout << "Found " << goodMatches.size() << " good matches and " << objectGoodPts.size() + sceneGoodPts.size() << " good features from them in " << timer.elapsed() << " seconds" << std::endl;
 
@@ -312,6 +354,9 @@ int runObjectDetection(bool test) {
 		if (dynamic_cast<cv::ORB*>(detector.get())) {
 			if (!test)std::cout << "Using ORB detector, setting BFMatching to use Hamming..." << std::endl;
 			matcher = cv::BFMatcher::create(cv::NORM_HAMMING);
+		}
+		else {
+			matcher = cv::BFMatcher::create();
 		}
 
 		// Detect the features
@@ -329,8 +374,12 @@ int runObjectDetection(bool test) {
 		if (!test) {
 			kptObjectImage = objectImage.clone();
 			kptSceneImage = sceneImage.clone();
-			cv::drawKeypoints(kptObjectImage, objectKeypoints, kptObject, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-			cv::drawKeypoints(kptSceneImage, sceneKeypoints, kptScene, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+			cv::drawKeypoints(kptObjectImage, objectKeypoints, kptObjectImage, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+			cv::drawKeypoints(kptSceneImage, sceneKeypoints, kptSceneImage, cv::Scalar(0, 255, 0), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+			// Save the images with keypoints
+			cv::imwrite("object_keypoints.jpg", kptObjectImage);
+			cv::imwrite("scene_keypoints.jpg", kptSceneImage);
+			// Display the images with keypoints
 			cv::namedWindow("Object Keypoints", cv::WINDOW_NORMAL);
 			cv::namedWindow("Scene Keypoints", cv::WINDOW_NORMAL);
 			cv::imshow("Object Keypoints", kptObjectImage);
@@ -402,6 +451,8 @@ int runObjectDetection(bool test) {
 
 
 	if (!test) {
+		// Save the matches found between images
+		saveMatchesImage(objectImage, sceneImage, objectKeypoints, sceneKeypoints, goodMatches, "obj-scene-matches.jpg");
 		// Save the detected object
 		cv::imwrite("detectedObject.png", detImage);
 
@@ -424,11 +475,11 @@ int speedTest() {
 	if (objectImage.empty() || sceneImage.empty()) {
 		if (loadImages() == -1) return -1;
 	}
-
+	int featureCap = 5000;
 	// Defining the feature detector as sift and descriptor matcher as flann at first
 	std::cout << "====== Starting SIFT test ======" << std::endl;
 	std::cout << "Setting detector to SIFT detector..." << std::endl;
-	detector = cv::SIFT::create();
+	detector = cv::SIFT::create(featureCap);
 	std::cout << "Setting matcher to FLANN matcher..." << std::endl;
 	matcher = cv::FlannBasedMatcher::create(); // Fast Library for Approximate Nearest Neighbours
 	findFeatures(detector, matcher, false);
@@ -442,7 +493,7 @@ int speedTest() {
 	// Running test using ORB detector
 	std::cout << "\n\n====== Starting ORB test ======" << std::endl;
 	std::cout << "Setting detector to ORB detector..." << std::endl;
-	detector = cv::ORB::create();
+	detector = cv::ORB::create(featureCap);
 	std::cout << "Setting matcher to FLANN matcher..." << std::endl;
 	matcher = cv::FlannBasedMatcher::create(); // Fast Library for Approximate Nearest Neighbours
 	findFeatures(detector, matcher, false);
@@ -500,8 +551,8 @@ int speedTest() {
 	std::cout << "Average time taken for ORB detector with BFM matcher: " << totalElapsedTime / testCount << " seconds" << std::endl;
 
 
-	// now run an averaging test with each detector/matcher combination using runObjectDetection
-	std::cout << "\n\n====== Starting object detection averaging test ======" << std::endl;
+	// averaging test with each detector/matcher combination using runObjectDetection -- not needed!
+	/*std::cout << "\n\n====== Starting object detection averaging test ======" << std::endl;
 	totalElapsedTime = 0.0;
 	// SIFT detector with FLANN matcher
 	detector = cv::SIFT::create();
@@ -543,84 +594,8 @@ int speedTest() {
 		totalElapsedTime += averageTimer.elapsed();
 	}
 	std::cout << "Average time taken for ORB detector with BFM matcher: " << totalElapsedTime / testCount << " seconds" << std::endl;
-
+	*/
 	return 0;
-}
-
-
-void detectAndDrawBoundingBox() {
-	loadImages();
-
-	// Detect keypoints and compute descriptors using ORB
-	cv::Ptr<cv::ORB> orb = cv::ORB::create(50000); // Adjust max features as needed
-	std::vector<cv::KeyPoint> objectKeypoints, sceneKeypoints;
-	cv::Mat objectDescriptors, sceneDescriptors;
-	orb->detectAndCompute(objectImage, cv::Mat(), objectKeypoints, objectDescriptors);
-	orb->detectAndCompute(sceneImage, cv::Mat(), sceneKeypoints, sceneDescriptors);
-
-	// FLANN-based matcher for ORB (LshIndexParams is needed for binary descriptors)
-	cv::FlannBasedMatcher orbFlannMatcher(
-		cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2)
-		//cv::makePtr<cv::flann::LshIndexParams>(24, 40, 4)
-	);
-
-	// Match descriptors
-	std::vector<cv::DMatch> matches;
-	orbFlannMatcher.match(objectDescriptors, sceneDescriptors, matches);
-
-	// Find min and max distances between keypoints
-	double maxDist = 0;
-	double minDist = 100;
-	for (const auto& match : matches) {
-		double dist = match.distance;
-		if (dist < minDist) minDist = dist;
-		if (dist > maxDist) maxDist = dist;
-	}
-
-	// Filter good matches using Lowe's ratio test
-	std::vector<cv::DMatch> goodMatches;
-	for (const auto& match : matches) {
-		if (match.distance < std::max(2 * minDist, 30.0)) { // 30 is a reasonable ORB threshold
-			goodMatches.push_back(match);
-		}
-	}
-
-	// Extract matched keypoints
-	std::vector<cv::Point2f> objPoints, scenePoints;
-	for (const auto& match : goodMatches) {
-		objPoints.push_back(objectKeypoints[match.queryIdx].pt);
-		scenePoints.push_back(sceneKeypoints[match.trainIdx].pt);
-	}
-
-	// Compute homography if we have enough points
-	if (objPoints.size() >= 4) {
-		cv::Mat H = cv::findHomography(objPoints, scenePoints, cv::RANSAC);
-
-		// Get the corners of the object image (rectangle)
-		std::vector<cv::Point2f> objCorners = {
-			{0, 0},
-			{(float)objectImage.cols, 0},
-			{(float)objectImage.cols, (float)objectImage.rows},
-			{0, (float)objectImage.rows}
-		};
-
-		// Warp the corners using the homography matrix
-		std::vector<cv::Point2f> sceneCorners(4);
-		cv::perspectiveTransform(objCorners, sceneCorners, H);
-
-		// Draw a bounding box around the detected object
-		for (int i = 0; i < 4; i++) {
-			cv::line(sceneImage, sceneCorners[i], sceneCorners[(i + 1) % 4], cv::Scalar(0, 255, 0), 3);
-		}
-		// Draw keypoints and good matches
-		cv::Mat imgMatches;
-		cv::drawMatches(objectImage, objectKeypoints, sceneImage, sceneKeypoints, goodMatches, imgMatches);
-		cv::imshow("Keypoints", imgMatches);
-
-		// Display the result
-		cv::imshow("Detected Object", sceneImage);
-		cv::waitKey(0);
-	}
 }
 
 /*
@@ -723,8 +698,8 @@ std::vector<cv::Point2f> getDetectedCorners() {
 	std::vector<cv::Point2f> objectGoodPts, sceneGoodPts;
 	std::vector<unsigned char> inliers;
 	cv::Mat objectDescriptors, sceneDescriptors;
-	int nfeaturesCap = 50000; // defining the maximum number of features that each detector can detect up to - default is 500
-	double lowesRatio = 0.8; // defines the Lowes Ratio - default is around 0.7 - 0.8
+	int nfeaturesCap = 2000; // defining the maximum number of features that each detector can detect up to - default is 500
+	double lowesRatio = 0.7; // defines the Lowes Ratio - default is around 0.7 - 0.8
 
 	// Set up the detector based on the settings
 	if (toLower(detectionMethod) == "sift") {
@@ -978,7 +953,7 @@ int accuracyTest() {
 	}
 	// Draw the bounding box around the detected object for debugging
 	drawBoxAndSaveImage("detectedObjectORB4.png", sceneImage, detectedCorners);
-	
+
 	// Calculate the pixel error for the test, putting each error into a vector for later, displays the results
 	totalError = 0;
 	for (size_t i = 0; i < 4; i++) {
@@ -1316,9 +1291,9 @@ int settingsMenu() {
  * - running accuracy test ~ to compare the accuracy of the SIFT and ORB detector using BFM
  * - exit ~ to close the program
  *
- * Had ChatGPT help me understand how to structure the main menu and read user input,
- * then used the same structure for the settings menu. Returned some broken code I had to alter
- * to work with the existing program.
+ * Had ChatGPT help me understand how to read user input, while I understood the structure I
+ * just needed to understand how to read input from user. I then used the same structure for
+ * the settings menu. Returned some broken code of course, had to alter to work with the existing program.
  */
 int mainMenu() {
 	int choice = 0;
@@ -1362,10 +1337,7 @@ int mainMenu() {
 			std::cout << "Exiting program.\n";
 			exitProgram = true;
 			break;
-		case 7:
-			detectAndDrawBoundingBox();
-			break;
-		case 8:
+		case 7: // secret utility option to allow you to determine the ground truth corners of the object in the scene
 			loadImages();
 			getGroundTruthCorners(sceneImage);
 			break;

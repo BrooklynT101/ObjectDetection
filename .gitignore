@@ -34,3 +34,16 @@ out/
 .vs/
 detectedObject.png
 .vscode/
+detectedObjectORB1.png
+detectedObjectORB2.png
+detectedObjectORB3.png
+detectedObjectORB4.png
+detectedObjectORB5.png
+detectedObjectSIFT1.png
+detectedObjectSIFT2.png
+detectedObjectSIFT3.png
+detectedObjectSIFT4.png
+detectedObjectSIFT5.png
+obj-scene-matches.jpg
+object_keypoints.jpg
+scene_keypoints.jpg
